@@ -18,21 +18,33 @@ def load_and_create_tutees(tutee_responses):
     '''
     tutee_df = pd.read_csv(tutee_responses)
     tutee_kerb_to_tutee_obj = {}
-    subject_to_tutee = {}
+    class_to_tutee = {}
     for _,row in tutee_df.iterrows():
-        subject_to_hours  = {row["Class 1"].strip():float(row["Hours 1"])}
-        if row["Class 1"].strip() not in subject_to_tutee:
-            subject_to_tutee[row["Class 1"].strip()] = [row['Keberos'].split("@")[0].lower()]
+        first_class = row["Class 1"].strip()
+        first_class_hours = float(row["Hours 1"])
+        keberos = row['Keberos'].split("@")[0].lower()
+        if first_class not in class_to_tutee:
+            class_to_tutee[first_class] = [keberos]
         else:
-            subject_to_tutee[row["Class 1"].strip()].append(row['Keberos'].split("@")[0].lower())
-        if (not pd.isnull(row["Class 2"])) and (not pd.isnull(row["Hours 2"])):
-            subject_to_hours[row["Class 2"].strip()] = float(row["Hours 2"])
+            class_to_tutee[first_class].append(keberos)
+        second_class = row["Class 2"]
+        second_class_hours = row["Hours 2"]
+        subject_to_hours = {first_class: first_class_hours}
+        if (not pd.isnull(second_class)) and (not pd.isnull(second_class_hours)):
+            second_class = second_class.strip()
+            second_class_hours = float(second_class_hours)
+            subject_to_hours[second_class] = second_class_hours
+            if second_class not in class_to_tutee:
+                class_to_tutee[second_class] = [keberos]
+            else:
+                class_to_tutee[second_class].append(keberos)
         tutee_object = tutee.Tutee(
-                row['Keberos'].split("@")[0].lower(), row['Name'],
+                keberos, row['Name'],
                 subject_to_hours, row["Timestamp"]
                 )
-        tutee_kerb_to_tutee_obj[row['Keberos'].split("@")[0].lower()] = tutee_object
-    return tutee_kerb_to_tutee_obj,subject_to_tutee
+        tutee_kerb_to_tutee_obj[keberos] = tutee_object
+    return tutee_kerb_to_tutee_obj,class_to_tutee
+
 
 def load_and_create_tutors(tutor_responses):
     '''
@@ -40,40 +52,28 @@ def load_and_create_tutors(tutor_responses):
     a list of Tutor objects
     '''
     tutor_df = pd.read_csv(tutor_responses)
-    subject_to_tutor = {}
     tutor_kerb_to_tutor_obj = {}
+    class_to_tutor = {}
     for _,row in tutor_df.iterrows():
-        subjects = {subject_.strip() for subject_ in row["Academic Support"].split(",")}
-        generics = set()
+        first_tier_class = {subject_.strip() for subject_ in row["Tier 1 Classes"].split(",")}
+        second_tier_class = {subject_.strip() for subject_ in row["Tier 2 Classes"].split(",")}
         kerberos = row['Keberos'].split("@")[0].lower()
+        classes = first_tier_class.union(second_tier_class)
 
         # Parse subjects and identify any generics
-        for subject in subjects:
-            generic_matcher = re.match("[\d]+[\.][\d]*[x]",subject)
-            if generic_matcher:
-                generics.add(subject)
-            if subject not in subject_to_tutor:
-                subject_to_tutor[subject] = [kerberos]
+        for class_ in classes:
+            if class_ not in class_to_tutor:
+                class_to_tutor[class_] = [kerberos]
             else:
-                subject_to_tutor[subject].append(kerberos)
-        
-        # Identify any non-academic support and remove empty strings
-        if not pd.isnull(row["Non-academic Support"]):
-            other_subjects = {other.strip() for other in row["Non-academic Support"].split(",")}
-            subjects |=other_subjects
-        if '' in subjects: # get rid of empty string from parsing
-            subjects.remove('')
+                class_to_tutor[class_].append(kerberos)
 
         #Create tutor object
         tutor_object = tutor.Tutor(
                 kerberos, row['Name'].strip(),
-                subjects, generics, min(_MAX_NUM_HOURS,float(row["Hours"])) # impose a max number of hours per tutor
+                classes, min(_MAX_NUM_HOURS,float(row["Hours"])) # impose a max number of hours per tutor
                 )
         tutor_kerb_to_tutor_obj[kerberos] = tutor_object
-    return tutor_kerb_to_tutor_obj,subject_to_tutor
-
-res1, res2 = load_and_create_tutors('data/TutorResponses.csv')
-print(res2)
+    return tutor_kerb_to_tutor_obj,class_to_tutor
 
 
 def load_and_create_subjects(subjects,tutors_offering,tutees_asking):
@@ -86,20 +86,20 @@ def load_and_create_subjects(subjects,tutors_offering,tutees_asking):
             tutees = tutees_asking[subject_]
         else:
             tutees = []
-        subject_obj = subject.Subject(subject_,tutors_offering[subject_],tutees)
+        subject_obj = subject.Subject(subject_, tutors_offering[subject_], tutees, len(tutees), len(tutors_offering[subject_]))
         subject_list.append(subject_obj)
     return subject_list
         
 
-def refine_tutor_list_with_generics(generics_to_tutors,tutors_to_tutor_obj,subject_list):
-    '''
-    Adds specific list of course numbers to the tutors list.
-    '''
-    for course_number,tutors in generics_to_tutors.items():
-        for subject in subject_list:
-            if subject.split(".")[0] == course_number:
-                for tutor in tutors:
-                    tutors_to_tutor_obj[tutor].subjects.add(tutor) 
+# def refine_tutor_list_with_generics(generics_to_tutors,tutors_to_tutor_obj,subject_list):
+#     '''
+#     Adds specific list of course numbers to the tutors list.
+#     '''
+#     for course_number,tutors in generics_to_tutors.items():
+#         for subject in subject_list:
+#             if subject.split(".")[0] == course_number:
+#                 for tutor in tutors:
+#                     tutors_to_tutor_obj[tutor].subjects.add(tutor) 
 
 
 def create_graph(tutor_response,tutee_response):
@@ -107,13 +107,10 @@ def create_graph(tutor_response,tutee_response):
     Creates graph for modelling matching problem and returns node list and adjacency maps
     '''
     #Create object lists
-    tutor_to_tutor_obj,subject_to_tutors,generic_course_to_tutors = load_and_create_tutors(tutor_response)
+    tutor_to_tutor_obj,subject_to_tutors = load_and_create_tutors(tutor_response)
     tutee_to_tutee_obj,subject_to_tutees = load_and_create_tutees(tutee_response)
     all_subjects = {subject.strip() for subject,_ in subject_to_tutors.items() if len(subject.strip()) != 0}
     subject_object_list = load_and_create_subjects(all_subjects,subject_to_tutors,subject_to_tutees)
-
-    #Refine tutor list to accommodate those that can teach any course eg. 7.01x, etc
-    refine_tutor_list_with_generics(generic_course_to_tutors,tutor_to_tutor_obj,all_subjects)
 
     #Initialize graph constructs
     nodes = {"source","sink"}
@@ -158,8 +155,6 @@ def max_flow(adjacency_map,tutor_to_tutor_obj,tutee_to_tutee_obj,subject_to_subj
         else:
             pairings.append(match)
     return pairings
-        
-    
 
 def find_path_and_construct_residual_graph(residual_graph,tutor_to_tutor_obj, tutee_to_tutee_obj,subject_to_subject_obj):
     '''
@@ -239,12 +234,15 @@ def find_path_and_construct_residual_graph(residual_graph,tutor_to_tutor_obj, tu
         return None
     else:
         #Reduce capacities and return the match made
-        if subject_to_subject_obj[final_path[2]].popularity_score < 79: #Place a cap on the number of hours if more than one student to serve
+        tutee_kerb = final_path[1]
+        subject = final_path[2]
+        tutor_kerb = final_path[3]
+        if subject_to_subject_obj[subject].popularity_score < 79: #Place a cap on the number of hours if more than one student to serve
             final_cap = min(1,final_cap)
-        if subject_to_subject_obj[final_path[2]].is_not_academic:
-            final_cap = min(0.5,final_cap)
-        if not subject_to_subject_obj[final_path[2]].is_not_academic and final_cap < 1:
-            tutor_cap = [cap for node,cap in adj_map[final_path[-2]] if node=="sink"][0]
+        # if subject_to_subject_obj[subject].is_not_academic:
+        #     final_cap = min(0.5,final_cap)
+        if not subject_to_subject_obj[subject].is_not_academic and final_cap < 1:
+            tutor_cap = [cap for node,cap in residual_graph[tutor_kerb] if node=="sink"][0]
             if tutor_cap >= 1:
                 final_cap = 1
         for i in range(len(final_path)-1):
@@ -258,10 +256,10 @@ def find_path_and_construct_residual_graph(residual_graph,tutor_to_tutor_obj, tu
                 residual_graph[node].add((current_edge[0],new_weight))
             if node in tutor_to_tutor_obj:
                 tutor_to_tutor_obj[node].received_assignment = True
-                tutor_to_tutor_obj[node].assign_hours(final_cap,final_path[1])
+                tutor_to_tutor_obj[node].assign_hours(final_cap,final_path[1],subject)
             if node in tutee_to_tutee_obj:
-                tutee_to_tutee_obj[node].assign_hours(final_cap,final_path[-2])
-    return (final_path[1],final_path[-2],final_path[-3],final_cap)
+                tutee_to_tutee_obj[node].assign_hours(final_cap,final_path[-2],subject)
+    return (tutee_kerb,tutor_kerb,subject,final_cap)
  
 
 def matching(adjacency_map,tutor_map,tutee_map,subject_map):
@@ -270,36 +268,48 @@ def matching(adjacency_map,tutor_map,tutee_map,subject_map):
     '''
     #Step 1: Run max flow normally using rules to break ties. 
     mappings = max_flow(adjacency_map,tutor_map,tutee_map,subject_map)
-    category_A = set()
-    field_names = ["Tutor Name", "Tutor Keberos", "Tutee Name", "Tutee Keberos", "Subject", "Hours","Tutor Email", "Tutee Email"]
-    field_names2 = ['Tutee Name', "Tutee Keberos"]
-    f = open('./Matchings.csv', 'w')
-    writer = csv.DictWriter(f,fieldnames=field_names)
+
+    #Step 2: Write the matched students to a file
+    pm_field_names = ["Tutor Name", "Tutee Name", "Subject", "Hours","Tutor Email", "Tutee Email"]
+    f = open('./primary_matching.csv', 'w')
+    writer = csv.DictWriter(f,fieldnames=pm_field_names)
     writer.writeheader()
-    f2 = open('./NoMatches.csv', 'w')
-    writer2 = csv.DictWriter(f2,fieldnames=field_names2)
+    matched_tutors = set()
+    matched_tutees = set()
+    for mapping in mappings:
+        tutee_kerb = mapping[0]
+        tutor_kerb = mapping[1]
+        matched_tutors.add(tutor_kerb)
+        matched_tutees.add(tutee_kerb)
+        subject_ = mapping[2]
+        num_hours  = mapping[3]
+        writer.writerow({"Tutor Email": tutor_kerb+"@mit.edu", "Tutee Email": tutee_kerb+"@mit.edu", "Subject":subject_, "Hours":num_hours, 'Tutor Name': tutor_map[tutor_kerb].name,'Tutee Name': tutee_map[tutee_kerb].name })
+    
+    # Step 3: Write the unmatched students to a file and unmatched tutors to a file
+    all_tutors = set(tutor_map.keys())
+    all_students = set(tutee_map.keys())
+    unmatched_tutors = all_tutors-matched_tutors
+    unmatched_tutees = all_students-matched_tutees
+    f2 = open('./unmatched_tutors.csv', 'w')
+    ututor_field_names = ["Tutor Name", "Tutor Email"]
+    writer2 = csv.DictWriter(f2,fieldnames=ututor_field_names)
     writer2.writeheader()
-    tutees = set()
-    for pair in mappings:
-        tutor_ = pair[1]
-        tutee_ = pair[0]
-        subject_ = pair[2]
-        time = pair[3]
-        category_A.add(tutor_)
-        tutees.add(tutee_)
-        writer.writerow({"Tutor Email": tutor_+"@mit.edu", "Tutee Email": tutee_+"@mit.edu", 'Tutor Keberos': tutor_, "Tutee Keberos": tutee_, "Subject":subject_, "Hours":time, 'Tutor Name': tutor_map[tutor_].name,'Tutee Name': tutee_map[tutee_].name })
+    for tutor_kerb in unmatched_tutors:
+            writer2.writerow({"Tutor Email": tutor_kerb+"@mit.edu", 'Tutor Name': tutor_map[tutor_kerb].name})
+    f3 = open('./unmatched_students.csv', 'w')
+    ututee_field_names = ["Tutee Name", "Tutee Email"]
+    writer3 = csv.DictWriter(f3,fieldnames=ututee_field_names)
+    writer3.writeheader()
+    for tutee_kerb in unmatched_tutees:
+            writer3.writerow({"Tutee Email": tutee_kerb+"@mit.edu", 'Tutee Name': tutee_map[tutee_kerb].name})
+    
+    # Step 4: Close all files
     f.close()
-    category_B = {(tutor_map[tutor_].name,tutor_map[tutor_].keberos) for tutor_ in tutor_map.keys() if tutor_ not in category_A}
-    print(category_B)
-    student_without_matchings = {tutee_map[tutee_] for tutee_ in tutee_map.keys() if tutee_ not in tutees}
-    for student in student_without_matchings:
-        writer2.writerow({"Tutee Name": student.name, "Tutee Keberos": student.keberos})
     f2.close()
+    f3.close()
 
-
-# #Step 1: Create a graph
-# adj_map,tutor_map,tutee_map,subject_map = create_graph("TutorResponses.csv", "TuteeResponses.csv")
-# matching(adj_map,tutor_map,tutee_map,subject_map)
-
+if __name__ == "__main__":
+    graph, tutor_map, tutee_map, subject_map = create_graph("data/TutorResponses.csv", "data/TuteeResponses.csv")
+    matching(graph, tutor_map, tutee_map, subject_map)
 
 
