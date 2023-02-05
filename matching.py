@@ -55,10 +55,10 @@ def load_and_create_tutors(tutor_responses):
     tutor_kerb_to_tutor_obj = {}
     class_to_tutor = {}
     for _,row in tutor_df.iterrows():
-        first_tier_class = {subject_.strip() for subject_ in row["Tier 1 Classes"].split(",")}
-        second_tier_class = {subject_.strip() for subject_ in row["Tier 2 Classes"].split(",")}
+        first_tier_classes = {subject_.strip() for subject_ in row["Tier 1 Classes"].split(",")}
+        second_tier_classes = {subject_.strip() for subject_ in row["Tier 2 Classes"].split(",")}
         kerberos = row['Keberos'].split("@")[0].lower()
-        classes = first_tier_class.union(second_tier_class)
+        classes =  first_tier_classes.union(second_tier_classes)
 
         # Parse subjects and identify any generics
         for class_ in classes:
@@ -70,7 +70,7 @@ def load_and_create_tutors(tutor_responses):
         #Create tutor object
         tutor_object = tutor.Tutor(
                 kerberos, row['Name'].strip(),
-                classes, min(_MAX_NUM_HOURS,float(row["Hours"])) # impose a max number of hours per tutor
+                first_tier_classes, second_tier_classes, min(_MAX_NUM_HOURS,float(row["Hours"])) # impose a max number of hours per tutor
                 )
         tutor_kerb_to_tutor_obj[kerberos] = tutor_object
     return tutor_kerb_to_tutor_obj,class_to_tutor
@@ -139,7 +139,8 @@ def create_graph(tutor_response,tutee_response):
             adjacency_map[tutor_obj.keberos].add(("sink",tutor_obj.hours))
         else:
             adjacency_map[tutor_obj.keberos] = {("sink",tutor_obj.hours)}
-        for subject_name in tutor_obj.subjects: #outgoing edge from subject to tutor
+        tutor_classes = tutor_obj.first_tier_subjects.union(tutor_obj.second_tier_subjects)
+        for subject_name in tutor_classes: #outgoing edge from subject to tutor
             if subject_name in adjacency_map:
                 adjacency_map[subject_name].add((tutor_obj.keberos,500))
             else:
@@ -194,7 +195,7 @@ def find_path_and_construct_residual_graph(residual_graph,tutor_to_tutor_obj, tu
             elif last_node in subject_to_subject_obj:
                 neighbours = [tutor_to_tutor_obj[n] for n,_ in residual_graph[last_node] if n in tutor_to_tutor_obj]
                 neighbours_to_weights = {n:w for n,w in residual_graph[last_node]}
-                neighbours = breaking_ties.order_tutors_by_rules(neighbours)
+                neighbours = breaking_ties.order_tutors_by_rules(neighbours, last_node)
                 new_paths = []
                 for neighbour in neighbours:
                     if neighbour.keberos in already_seen:
@@ -255,7 +256,6 @@ def find_path_and_construct_residual_graph(residual_graph,tutor_to_tutor_obj, tu
             if new_weight > 0:
                 residual_graph[node].add((current_edge[0],new_weight))
             if node in tutor_to_tutor_obj:
-                tutor_to_tutor_obj[node].received_assignment = True
                 tutor_to_tutor_obj[node].assign_hours(final_cap,final_path[1],subject)
             if node in tutee_to_tutee_obj:
                 tutee_to_tutee_obj[node].assign_hours(final_cap,final_path[-2],subject)
@@ -309,7 +309,7 @@ def matching(adjacency_map,tutor_map,tutee_map,subject_map):
     f3.close()
 
 if __name__ == "__main__":
-    graph, tutor_map, tutee_map, subject_map = create_graph("data/TutorResponses.csv", "data/TuteeResponses.csv")
+    graph, tutor_map, tutee_map, subject_map = create_graph("data_/TutorResponses.csv", "data_/TuteeResponses.csv")
     matching(graph, tutor_map, tutee_map, subject_map)
 
 
