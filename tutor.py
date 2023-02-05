@@ -1,8 +1,9 @@
 import student
 class Tutor(student.Student):
-    def __init__(self,keberos,name,subject_set, hours) -> None:
+    def __init__(self,keberos,name,first_tier_set, second_tier_set, hours) -> None:
         super().__init__(keberos,name)
-        self.subjects = subject_set
+        self.first_tier_subjects = first_tier_set
+        self.second_tier_subjects = second_tier_set
         self.hours = hours
         self.assigned_hours = 0
         self.assigned_students_and_subject = {}
