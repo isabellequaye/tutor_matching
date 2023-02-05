@@ -1,11 +1,15 @@
-
-def order_tutors_by_rules(tutorList):
+def order_tutors_by_rules(tutorList, subject_):
     '''
     Returns a list of tutors ordered by rules
     '''
     tutor_tuples=  []
     for tutor in tutorList:
-        tutor_tuple = ((tutor.received_assignment,tutor.assigned_hours,len(tutor.subjects)),tutor)
+        num_classes = len(tutor.first_tier_subjects) + len(tutor.second_tier_subjects)
+        first_tier_class = subject_ in tutor.first_tier_subjects
+        if first_tier_class:
+            tutor_tuple = ((tutor.received_assignment, 0, tutor.assigned_hours, num_classes),tutor)
+        else:
+            tutor_tuple = ((tutor.received_assignment, 1, tutor.assigned_hours, num_classes),tutor)
         tutor_tuples.append(tutor_tuple)
     sorted_tutor_tuples = sorted(tutor_tuples, key=lambda x:x[0])
     return [tutor for _,tutor in sorted_tutor_tuples]
